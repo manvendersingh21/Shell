@@ -1,4 +1,4 @@
-**Shell Implementation Overview**
+#**Shell Implementation Overview**
 **This project is a simple shell that provides basic command execution, including built-in commands and support for external programs. Below is a breakdown of key functions and their roles in the shell:**
 
 **Core Functions**
