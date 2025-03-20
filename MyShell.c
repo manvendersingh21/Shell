@@ -1,10 +1,16 @@
 
+#include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h> 
 
+
+#define PATH_MAX 4096
+#define LSH_TOK_BUFSIZE 64
+#define LSH_TOK_DELIM " \t\r\n\a"
 /*
   Function Declarations for builtin shell commands:
  */
@@ -31,9 +37,7 @@ int lsh_num_builtins() {
   return sizeof(builtin_str) / sizeof(char *);
 }
 
-/*
-  Builtin function implementations.
-*/
+
 
 /**
    @brief Bultin command: change directory.
@@ -43,7 +47,7 @@ int lsh_num_builtins() {
 int lsh_cd(char **args)
 {
   if (args[1] == NULL) {
-    fprintf(stderr, "lsh: expected argument to \"cd\"\n");
+    fprintf(stderr, "MS shell: expected argument to \"cd\"\n");
   } else {
     if (chdir(args[1]) != 0) {
       perror("lsh");
@@ -60,7 +64,7 @@ int lsh_cd(char **args)
 int lsh_help(char **args)
 {
   int i;
-  printf("Stephen Brennan's LSH\n");
+  printf("Manvender Singh's MS Shell\n");
   printf("Type program names and arguments, and hit enter.\n");
   printf("The following are built in:\n");
 
@@ -96,12 +100,12 @@ int lsh_launch(char **args)
   if (pid == 0) {
     // Child process
     if (execvp(args[0], args) == -1) {
-      perror("lsh");
+      perror("MS Shell");
     }
     exit(EXIT_FAILURE);
   } else if (pid < 0) {
     // Error forking
-    perror("lsh");
+    perror("MS Shell");
   } else {
     // Parent process
     do {
@@ -135,50 +139,31 @@ int lsh_execute(char **args)
   return lsh_launch(args);
 }
 
-#define LSH_RL_BUFSIZE 1024
 /**
    @brief Read a line of input from stdin.
    @return The line from stdin.
  */
+
 char *lsh_read_line(void)
 {
-  int bufsize = LSH_RL_BUFSIZE;
-  int position = 0;
-  char *buffer = malloc(sizeof(char) * bufsize);
-  int c;
+  char *line = NULL;
+  size_t bufsize = 0;
+  ssize_t nread = getline(&line, &bufsize, stdin);
 
-  if (!buffer) {
-    fprintf(stderr, "lsh: allocation error\n");
-    exit(EXIT_FAILURE);
-  }
-
-  while (1) {
-    // Read a character
-    c = getchar();
-
-    // If we hit EOF, replace it with a null character and return.
-    if (c == EOF || c == '\n') {
-      buffer[position] = '\0';
-      return buffer;
-    } else {
-      buffer[position] = c;
-    }
-    position++;
-
-    // If we have exceeded the buffer, reallocate.
-    if (position >= bufsize) {
-      bufsize += LSH_RL_BUFSIZE;
-      buffer = realloc(buffer, bufsize);
-      if (!buffer) {
-        fprintf(stderr, "lsh: allocation error\n");
-        exit(EXIT_FAILURE);
-      }
+  if (nread == -1) {
+    if (feof(stdin)) {
+      exit(EXIT_SUCCESS);  // We recieved an EOF
+    } else  {
+      perror("readline");
+      exit(EXIT_FAILURE);
     }
   }
+
+  if (line[nread - 1] == '\n') line[nread - 1] = '\0';  // Remove newline
+  return line;
 }
 
-#define LSH_TOK_BUFSIZE 64
-#define LSH_TOK_DELIM " \t\r\n\a"
+
 /**
    @brief Split a line into tokens (very naively).
    @param line The line.
@@ -191,7 +176,7 @@ char **lsh_split_line(char *line)
   char *token;
 
   if (!tokens) {
-    fprintf(stderr, "lsh: allocation error\n");
+    fprintf(stderr, "MS Shell: allocation error\n");
     exit(EXIT_FAILURE);
   }
 
@@ -204,7 +189,7 @@ char **lsh_split_line(char *line)
       bufsize += LSH_TOK_BUFSIZE;
       tokens = realloc(tokens, bufsize * sizeof(char*));
       if (!tokens) {
-        fprintf(stderr, "lsh: allocation error\n");
+        fprintf(stderr, "MS Shell: allocation error\n");
         exit(EXIT_FAILURE);
       }
     }
@@ -223,15 +208,127 @@ void lsh_loop(void)
   char *line;
   char **args;
   int status;
+  char cwd[PATH_MAX];
+  char *pipe_ptr;
+  char *redir_ptr;
 
   do {
-    printf("> ");
+    printf("MS Shell:~");
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+      printf("%s> ", cwd);  // Print the current path as the prompt.
+  } else {
+      perror("getcwd() error");
+      exit(EXIT_FAILURE);
+  }
+ 
+    fflush(stdout);
     line = lsh_read_line();
-    args = lsh_split_line(line);
-    status = lsh_execute(args);
+    pipe_ptr = strstr(line, "|");
+    redir_ptr = strstr(line, ">");
+    
+     if (redir_ptr != NULL) {
+      /**
+       * Handle output redirection.
+       * We assume the command is of the form:
+       *   command ... > filename
+       */
+      *redir_ptr = '\0';   // Split at '>'
+      redir_ptr++;         // Move to start of filename
 
+      // Trim leading spaces on the filename
+      while (*redir_ptr == ' ') redir_ptr++;
+
+      // Parse the command
+      char **args = lsh_split_line(line);
+
+      // Open the file
+      int fd = open(redir_ptr, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      if (fd < 0) {
+          perror("open");
+          free(args);
+          continue;
+      }
+
+      pid_t pid = fork();
+      if (pid == 0) {
+          // Child: redirect stdout to the file
+          if (dup2(fd, STDOUT_FILENO) == -1) {
+              perror("dup2");
+              exit(EXIT_FAILURE);
+          }
+          close(fd);
+
+          // Execute the command
+          execvp(args[0], args);
+          perror("execvp");
+          exit(EXIT_FAILURE);
+      }
+      else if (pid > 0) {
+          // Parent: close file and wait
+          close(fd);
+          waitpid(pid, NULL, 0);
+      }
+      else {
+          perror("fork");
+      }
+
+      free(args);
+  }else if(pipe_ptr!=NULL){
+      status =1;
+      // Handle a command with a single pipe.
+      *pipe_ptr = '\0';    // Terminate the left-hand command.
+      pipe_ptr++;          // Move pointer to the right-hand command.
+      while (*pipe_ptr == ' ') pipe_ptr++;  // Skip leading spaces.
+
+      // Split the two commands into arguments.
+      char **left_args = lsh_split_line(line);
+      char **right_args = lsh_split_line(pipe_ptr);
+
+      int fd[2];
+      if (pipe(fd) == -1) {  // Create a pipe.
+          perror("pipe");
+          continue;
+      }
+
+      pid_t pid1 = fork();
+      if (pid1 == 0) {
+          // First child: redirect stdout to pipe write end.
+          dup2(fd[1], STDOUT_FILENO);
+          close(fd[0]);
+          close(fd[1]);
+          execvp(left_args[0], left_args);
+          perror("execvp");
+          exit(EXIT_FAILURE);
+      }
+
+      pid_t pid2 = fork();
+      if (pid2 == 0) {
+          // Second child: redirect stdin from pipe read end.
+          dup2(fd[0], STDIN_FILENO);
+          close(fd[1]);
+          close(fd[0]);
+          execvp(right_args[0], right_args);
+          perror("execvp");
+          exit(EXIT_FAILURE);
+      }
+
+      // Parent: close both ends of the pipe and wait for children.
+      close(fd[0]);
+      close(fd[1]);
+      waitpid(pid1, NULL, 0);
+      waitpid(pid2, NULL, 0);
+
+      free(left_args);
+      free(right_args);
+     
+    }else{
+      args = lsh_split_line(line);
+      status = lsh_execute(args);
+      free(args);
+
+    }
     free(line);
-    free(args);
+    
   } while (status);
 }
 
@@ -252,3 +349,5 @@ int main(int argc, char **argv)
 
   return EXIT_SUCCESS;
 }
+
+
