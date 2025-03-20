@@ -1,8 +1,8 @@
-#Shell Implementation Overview
-#This project is a simple shell that provides basic command execution, including built-in commands and support for external programs. Below is a breakdown of key functions and their roles in the shell:
+**Shell Implementation Overview**
+**This project is a simple shell that provides basic command execution, including built-in commands and support for external programs. Below is a breakdown of key functions and their roles in the shell:**
 
-Core Functions
-int lsh_num_builtins()
+**Core Functions**
+int** lsh_num_builtins()**
 
 Purpose: Returns the count of built-in commands (e.g., cd, help, exit).
 Why? Helps the shell determine how many internal commands it can process.
@@ -50,9 +50,9 @@ Why? Serves as the program’s entry point, as required in C.
 System Calls Used
 The shell utilizes several system calls for process control, file operations, and input handling:
 
-Process management: fork(), execvp(), waitpid(), exit()
+**Process management: fork(), execvp(), waitpid(), exit()
 Directory operations: chdir(), getcwd()
 File handling: open(), close(), dup2()
 Pipes and redirection: pipe()
 Input reading: read() (via getline())
-This shell provides a minimal yet functional command-line environment, allowing users to execute both built-in and external commands efficiently.
+This shell provides a minimal yet functional command-line environment, allowing users to execute both built-in and external commands efficiently.**
